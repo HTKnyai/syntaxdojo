@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTypingSession } from '@/hooks/useTypingSession';
 import { getRandomProblems } from '@/lib/data/mockProblems';
-import { LANGUAGES } from '@/types/problem';
+import { LANGUAGES, type LanguageId } from '@/types/problem';
+import { sessionService } from '@/services/sessionService';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ProblemDisplay } from '@/components/typing/ProblemDisplay';
@@ -62,7 +63,13 @@ export default function TypingPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [state.status, handleKeyPress]);
 
-  const handleFinish = useCallback(() => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleFinish = useCallback(async () => {
+    if (!user) return;
+
+    setIsSaving(true);
+
     // Calculate final results
     const totalProblems = state.results.length;
     const averageWPM =
@@ -70,18 +77,41 @@ export default function TypingPage() {
     const averageAccuracy =
       state.results.reduce((sum, r) => sum + r.accuracy, 0) / totalProblems || 0;
 
-    // Navigate to results page with data
-    router.push(
-      `/results?` +
-        new URLSearchParams({
-          languageId,
-          totalProblems: totalProblems.toString(),
-          averageWPM: Math.round(averageWPM).toString(),
-          averageAccuracy: Math.round(averageAccuracy).toString(),
-          totalTime: elapsedTime.toString(),
-        }).toString()
+    const sessionResults = {
+      totalProblems,
+      averageWPM: Math.round(averageWPM),
+      averageAccuracy: Math.round(averageAccuracy),
+      totalTimeSeconds: elapsedTime,
+      problemResults: state.results,
+    };
+
+    // Save to Firestore
+    const result = await sessionService.saveResults(
+      user.uid,
+      languageId as LanguageId,
+      sessionResults
     );
-  }, [state.results, elapsedTime, languageId, router]);
+
+    setIsSaving(false);
+
+    if (result.success) {
+      // Navigate to results page with session ID
+      router.push(`/results?sessionId=${result.data.id}`);
+    } else {
+      // On error, still navigate but without session ID
+      console.error('Failed to save session:', result.error);
+      router.push(
+        `/results?` +
+          new URLSearchParams({
+            languageId,
+            totalProblems: totalProblems.toString(),
+            averageWPM: Math.round(averageWPM).toString(),
+            averageAccuracy: Math.round(averageAccuracy).toString(),
+            totalTime: elapsedTime.toString(),
+          }).toString()
+      );
+    }
+  }, [state.results, elapsedTime, languageId, router, user]);
 
   if (authLoading) {
     return (
@@ -105,8 +135,8 @@ export default function TypingPage() {
           <CardContent className="space-y-4">
             <p className="text-gray-600">お疲れ様でした。結果を確認しましょう。</p>
             <div className="flex space-x-4">
-              <Button onClick={handleFinish} className="flex-1">
-                結果を見る
+              <Button onClick={handleFinish} className="flex-1" disabled={isSaving}>
+                {isSaving ? '保存中...' : '結果を見る'}
               </Button>
               <Button
                 variant="outline"

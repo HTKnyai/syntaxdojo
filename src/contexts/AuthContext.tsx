@@ -42,7 +42,7 @@ function firebaseUserToUser(firebaseUser: FirebaseUser): User {
 
 function createAppError(error: unknown): AppError {
   if (error instanceof Error) {
-    const errorCode = (error as any).code;
+    const errorCode = (error as { code?: string }).code;
 
     switch (errorCode) {
       case 'auth/invalid-email':
